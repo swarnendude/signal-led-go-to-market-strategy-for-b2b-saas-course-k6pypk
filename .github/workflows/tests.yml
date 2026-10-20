@@ -1,0 +1,48 @@
+name: tests
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+      - name: Run the tests
+        shell: bash
+        run: |
+          list="$RUNNER_TEMP/test-folders.txt"
+          if [ "$GITHUB_EVENT_NAME" = push ] && git rev-parse -q --verify 'HEAD^' > /dev/null; then
+            echo "Testing the folders this commit changed."
+            git -c core.quotePath=false diff --name-only HEAD^ HEAD | while IFS= read -r file; do
+              dir=$(dirname "$file")
+              while [ "$dir" != . ]; do
+                if compgen -G "$dir/test_*.py" > /dev/null; then echo "./$dir"; fi
+                dir=$(dirname "$dir")
+              done
+            done | sort -u > "$list"
+          else
+            echo "Testing every folder."
+            find . -name 'test_*.py' -not -path './.git/*' -exec dirname {} \; | sort -u > "$list"
+          fi
+          status=0
+          found=0
+          while IFS= read -r dir; do
+            found=1
+            echo "== $dir =="
+            if ! (cd "$dir" && python -m pytest -q test_*.py); then
+              status=1
+              echo "FAILED in $dir"
+            fi
+          done < "$list"
+          if [ "$found" = 0 ]; then echo "No tests to run for this commit."; fi
+          exit $status
